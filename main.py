@@ -63,7 +63,7 @@ class NetworkMonitorController:
         self.filter_entry.bind('<Return>', self.apply_filter)
 
         # Add a button to apply the filter
-        self.filter_button = ttk.Button(self.filter_frame, text="Enter", command=self.apply_filter)
+        self.filter_button = ttk.Button(self.filter_frame, text="Apply Filter", command=self.apply_filter)
         self.filter_button.pack(side=tk.LEFT, padx=10, pady=5)
 
         # Create a Frame for packet display
@@ -92,16 +92,22 @@ class NetworkMonitorController:
         self.bandwidth_usage_label = ttk.Label(self.metrics_frame, text="Bandwidth Usage: N/A")
         self.bandwidth_usage_label.pack(side=tk.LEFT, padx=10)
 
-        # Create a frame for the graph
+        # Create a frame for the graphs
         self.graph_frame = ttk.Frame(self.root)
         self.graph_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Set up Matplotlib Figure and Axis
-        self.figure = Figure(figsize=(10, 5), dpi=100)
-        self.ax = self.figure.add_subplot(111)
-        self.ax.set_title("Packet Rate Over Time")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Packet Rate (packets/s)")
+        # Set up Matplotlib Figure and Axes
+        self.figure = Figure(figsize=(15, 5), dpi=100)
+        self.ax1 = self.figure.add_subplot(121)
+        self.ax2 = self.ax1.twinx()
+        self.ax3 = self.figure.add_subplot(122)
+        self.ax1.set_title("Network Performance Over Time")
+        self.ax1.set_xlabel("Time (s)")
+        self.ax1.set_ylabel("Bandwidth Usage (bytes/s)")
+        self.ax2.set_ylabel("Packet Rate (packets/s) and Average Packet Size (bytes)")
+        self.ax3.set_title("Packet Details Over Time")
+        self.ax3.set_xlabel("Time (s)")
+        self.ax3.set_ylabel("Packet Length")
 
         # Create a FigureCanvasTkAgg widget
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.graph_frame)
@@ -110,6 +116,13 @@ class NetworkMonitorController:
         # Data for plotting
         self.time_data = []
         self.packet_rate_data = []
+        self.bandwidth_usage_data = []
+        self.average_packet_size_data = []
+        self.packet_length_data = []
+        self.packet_protocol_data = []
+        self.packet_source_data = []
+        self.packet_destination_data = []
+        self.packet_index_data = []
 
     def packet_callback(self, packet):
         # Check if the packet contains the IP layer
@@ -165,8 +178,11 @@ class NetworkMonitorController:
             # Calculate bandwidth usage (bytes per second)
             bandwidth_usage = self.total_data_length / elapsed_time
 
+            # Calculate average packet size
+            average_packet_size = self.total_data_length / self.packet_count
+
             # Put the metrics in the queue to be processed by the main thread
-            self.metrics_queue.put((packet_rate, bandwidth_usage, elapsed_time))
+            self.metrics_queue.put((packet_rate, bandwidth_usage, average_packet_size, elapsed_time, packet_data))
 
     def start_sniffing(self):
         # Sniff packets using scapy and call packet_callback for each packet
@@ -187,15 +203,23 @@ class NetworkMonitorController:
 
             try:
                 # Get metrics from the metrics_queue
-                packet_rate, bandwidth_usage, elapsed_time = self.metrics_queue.get_nowait()
+                packet_rate, bandwidth_usage, average_packet_size, elapsed_time, packet_data = self.metrics_queue.get_nowait()
 
                 # Update the UI with these metrics
                 self.packet_rate_label.config(text=f"Packet Rate: {packet_rate:.2f} packets/sec")
                 self.bandwidth_usage_label.config(text=f"Bandwidth Usage: {bandwidth_usage:.2f} bytes/sec")
 
-                # Update the graph
+                # Update the graph data
                 self.time_data.append(elapsed_time)
                 self.packet_rate_data.append(packet_rate)
+                self.bandwidth_usage_data.append(bandwidth_usage)
+                self.average_packet_size_data.append(average_packet_size)
+                self.packet_length_data.append(packet_data['length'])
+                self.packet_protocol_data.append(packet_data['protocol'])
+                self.packet_source_data.append(packet_data['source'])
+                self.packet_destination_data.append(packet_data['destination'])
+                self.packet_index_data.append(len(self.packet_index_data) + 1)
+
                 self.update_graph()
 
             except Empty:
@@ -209,61 +233,53 @@ class NetworkMonitorController:
             time.sleep(0.5)  # Adjust the delay time as needed (0.5 seconds in this example)
 
     def update_graph(self):
-        self.ax.clear()
-        self.ax.plot(self.time_data, self.packet_rate_data, label='Packet Rate')
-        self.ax.set_title("Packet Rate Over Time")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Packet Rate (packets/s)")
-        self.ax.legend()
+        self.ax1.clear()
+        self.ax2.clear()
+        self.ax3.clear()
+
+        self.ax1.plot(self.time_data, self.bandwidth_usage_data, label='Bandwidth Usage (bytes/s)', color='red')
+        self.ax2.plot(self.time_data, self.packet_rate_data, label='Packet Rate (packets/s)', color='blue')
+        self.ax2.plot(self.time_data, self.average_packet_size_data, label='Average Packet Size (bytes)', color='green')
+        self.ax3.plot(self.time_data, self.packet_length_data, label='Packet Length', color='purple')
+        self.ax3.scatter(self.time_data, self.packet_index_data, label='Packet Index', color='orange')
+
+        self.ax1.set_title("Network Performance Over Time")
+        self.ax1.set_xlabel("Time (s)")
+        self.ax1.set_ylabel("Bandwidth Usage (bytes/s)")
+        self.ax2.set_ylabel("Packet Rate (packets/s) and Average Packet Size (bytes)")
+        self.ax3.set_title("Packet Details Over Time")
+        self.ax3.set_xlabel("Time (s)")
+        self.ax3.set_ylabel("Packet Length")
+
+        self.ax1.legend(loc='upper left')
+        self.ax2.legend(loc='upper right')
+        self.ax3.legend(loc='upper left')
+
         self.canvas.draw()
 
-    def display_packet(self, packet_data):
-        # Get the current items in the Treeview
-        children = self.packet_tree.get_children()
-
-        # Insert new packet data at the beginning
-        self.packet_tree.insert('', 0, text=len(children) + 1, values=(
-            packet_data['timestamp'],
-            packet_data['source'],
-            packet_data['destination'],
-            packet_data['protocol'],
-            packet_data['length'],
-            packet_data['info']
-        ))
-
     def apply_filter(self, event=None):
-        filter_criteria = self.filter_text.get()
-        filtered_packets = self.filter_packets(filter_criteria)
-        self.display_filtered_packets(filtered_packets)
+        filter_text = self.filter_text.get()
+        filtered_packets = [pkt for pkt in self.packets if filter_text in pkt['info']]
 
-    def filter_packets(self, filter_criteria):
-        filtered_packets = []
-        for packet in self.packets:
-            if self.match_filter(packet, filter_criteria):
-                filtered_packets.append(packet)
-        return filtered_packets
+        # Clear the Treeview
+        for row in self.packet_tree.get_children():
+            self.packet_tree.delete(row)
 
-    def match_filter(self, packet, filter_criteria):
-        try:
-            if filter_criteria:
-                filter_expr = filter_criteria.replace('==', '==').replace('!=', '!=').replace('&&', 'and').replace('||', 'or')
-                return eval(filter_expr, {}, packet)
-            return True
-        except Exception as e:
-            print(f"Error in filter expression: {e}")
-            return False
+        # Display the filtered packets
+        for i, packet_data in enumerate(filtered_packets):
+            self.packet_tree.insert('', 'end', text=str(i + 1), values=(
+                packet_data['timestamp'], packet_data['source'], packet_data['destination'],
+                packet_data['protocol'], packet_data['length'], packet_data['info']))
 
-    def display_filtered_packets(self, filtered_packets):
-        # Clear the current display
-        for item in self.packet_tree.get_children():
-            self.packet_tree.delete(item)
+    def display_packet(self, packet_data):
+        # Add the packet data to the Treeview
+        index = len(self.packet_tree.get_children()) + 1
+        self.packet_tree.insert('', 'end', text=str(index), values=(
+            packet_data['timestamp'], packet_data['source'], packet_data['destination'],
+            packet_data['protocol'], packet_data['length'], packet_data['info']))
 
-        # Display filtered packets
-        for packet_data in filtered_packets:
-            self.display_packet(packet_data)
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = NetworkMonitorController(root)
-    app.update_gui()  # Start GUI update loop
-    root.mainloop()
+# Main application loop
+root = tk.Tk()
+app = NetworkMonitorController(root)
+app.update_gui()
+root.mainloop()
