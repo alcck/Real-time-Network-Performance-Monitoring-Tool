@@ -10,7 +10,6 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-
 class NetworkMonitorController:
     def __init__(self, root):
         self.root = root
