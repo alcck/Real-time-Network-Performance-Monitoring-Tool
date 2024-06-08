@@ -10,6 +10,19 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+
+PROTOCOLS = {
+    1: 'ICMP',
+    6: 'TCP',
+    17: 'UDP',
+    2: 'IGMP',
+    47: 'GRE',
+    50: 'ESP',
+    51: 'AH',
+    89: 'OSPF',
+    132: 'SCTP'
+}
+
 class NetworkMonitorController:
     def __init__(self, root):
         self.root = root
@@ -100,6 +113,7 @@ class NetworkMonitorController:
         self.ax1 = self.figure.add_subplot(121)
         self.ax2 = self.ax1.twinx()
         self.ax3 = self.figure.add_subplot(122)
+        self.ax4 = self.ax3.twinx()
         self.ax1.set_title("Network Performance Over Time")
         self.ax1.set_xlabel("Time (s)")
         self.ax1.set_ylabel("Bandwidth Usage (bytes/s)")
@@ -107,6 +121,7 @@ class NetworkMonitorController:
         self.ax3.set_title("Packet Details Over Time")
         self.ax3.set_xlabel("Time (s)")
         self.ax3.set_ylabel("Packet Length")
+        self.ax4.set_ylabel("Protocol")
 
         # Create a FigureCanvasTkAgg widget
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.graph_frame)
@@ -131,7 +146,7 @@ class NetworkMonitorController:
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # Convert timestamp to string format
                 'source': str(packet[IP].src),  # Access source IP address using IP.src
                 'destination': str(packet[IP].dst),  # Access destination IP address using IP.dst
-                'protocol': str(packet[IP].proto),  # Access protocol using IP.proto
+                'protocol': PROTOCOLS.get(packet[IP].proto, str(packet[IP].proto)),  # Access protocol using IP.proto and map to name
                 'length': len(packet),
                 'info': packet.summary()  # Summary of packet
             }
@@ -235,12 +250,13 @@ class NetworkMonitorController:
         self.ax1.clear()
         self.ax2.clear()
         self.ax3.clear()
+        self.ax4.clear()
 
         self.ax1.plot(self.time_data, self.bandwidth_usage_data, label='Bandwidth Usage (bytes/s)', color='red')
         self.ax2.plot(self.time_data, self.packet_rate_data, label='Packet Rate (packets/s)', color='blue')
         self.ax2.plot(self.time_data, self.average_packet_size_data, label='Average Packet Size (bytes)', color='green')
         self.ax3.plot(self.time_data, self.packet_length_data, label='Packet Length', color='purple')
-        self.ax3.scatter(self.time_data, self.packet_index_data, label='Packet Index', color='orange')
+        self.ax4.plot(self.time_data, self.packet_protocol_data, label='Protocol', color='brown')
 
         self.ax1.set_title("Network Performance Over Time")
         self.ax1.set_xlabel("Time (s)")
@@ -249,36 +265,64 @@ class NetworkMonitorController:
         self.ax3.set_title("Packet Details Over Time")
         self.ax3.set_xlabel("Time (s)")
         self.ax3.set_ylabel("Packet Length")
+        self.ax4.set_ylabel("Protocol")
 
         self.ax1.legend(loc='upper left')
         self.ax2.legend(loc='upper right')
         self.ax3.legend(loc='upper left')
+        self.ax4.legend(loc='upper right')
 
         self.canvas.draw()
 
-    def apply_filter(self, event=None):
-        filter_text = self.filter_text.get()
-        filtered_packets = [pkt for pkt in self.packets if filter_text in pkt['info']]
-
-        # Clear the Treeview
-        for row in self.packet_tree.get_children():
-            self.packet_tree.delete(row)
-
-        # Display the filtered packets
-        for i, packet_data in enumerate(filtered_packets):
-            self.packet_tree.insert('', 'end', text=str(i + 1), values=(
-                packet_data['timestamp'], packet_data['source'], packet_data['destination'],
-                packet_data['protocol'], packet_data['length'], packet_data['info']))
-
     def display_packet(self, packet_data):
-        # Add the packet data to the Treeview
         index = len(self.packet_tree.get_children()) + 1
-        self.packet_tree.insert('', 'end', text=str(index), values=(
-            packet_data['timestamp'], packet_data['source'], packet_data['destination'],
-            packet_data['protocol'], packet_data['length'], packet_data['info']))
+        self.packet_tree.insert("", "end", text=index, values=(
+            packet_data['timestamp'],
+            packet_data['source'],
+            packet_data['destination'],
+            packet_data['protocol'],
+            packet_data['length'],
+            packet_data['info']
+        ))
 
-# Main application loop
-root = tk.Tk()
-app = NetworkMonitorController(root)
-app.update_gui()
-root.mainloop()
+    def apply_filter(self, event=None):
+        filter_text = self.filter_text.get().lower().strip()
+        self.packet_tree.delete(*self.packet_tree.get_children())
+
+        # Parse the filter
+        if "==" in filter_text:
+            field, value = filter_text.split("==")
+            field = field.strip()
+            value = value.strip()
+
+            filtered_packets = [
+                pkt for pkt in self.packets
+                if (field == "ip.src" and pkt['source'] == value) or
+                   (field == "ip.dst" and pkt['destination'] == value) or
+                   (field == "protocol" and pkt['protocol'].lower() == value.lower()) or
+                   (field == "length" and str(pkt['length']) == value) or
+                   (field == "timestamp" and value in pkt['timestamp'].lower()) or
+                   (field == "info" and value in pkt['info'].lower())
+            ]
+        else:
+            filtered_packets = [
+                pkt for pkt in self.packets
+                if filter_text in pkt['timestamp'].lower() or
+                   filter_text in pkt['source'].lower() or
+                   filter_text in pkt['destination'].lower() or
+                   filter_text in pkt['protocol'].lower() or
+                   filter_text in str(pkt['length']) or
+                   filter_text in pkt['info'].lower()
+            ]
+
+        for packet in filtered_packets:
+            self.display_packet(packet)
+
+    def run(self):
+        self.update_gui()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = NetworkMonitorController(root)
+    app.run()
